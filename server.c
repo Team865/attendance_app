@@ -113,7 +113,7 @@ Return Value:
                     Connection,
                     200,
 					"Content-Type: text/plain\r\n",
-                    "success %s %s",
+                    "success\n%s\n%s",
                     Name,
                     Number
                     );
