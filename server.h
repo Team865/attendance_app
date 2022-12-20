@@ -49,10 +49,16 @@ Revision History:
 #define STRINGIZE_EXPAND(x) STRINGIZE(x)
 
 //
+// Get the number of elements in an array
+//
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+//
 // Default port
 //
 
-#define DEFAULT_PORT 8000
+#define DEFAULT_PORT 80
 
 //
 // Poll rate (milliseconds)
@@ -71,6 +77,30 @@ Revision History:
 //
 
 #define STATIC_PAGE "index.html"
+
+//
+// Subdirectory where API is accessible
+//
+
+#define API_DIR "api"
+
+//
+// Make an endpoint string
+//
+
+#define MAKE_ENDPOINT(End) "/" API_DIR "/" End
+
+//
+// Test endpoint
+//
+
+#define TEST_ENDPOINT "test"
+
+//
+// Send a user's input to the Google Sheet
+//
+
+#define SEND_USER_ENDPOINT "send_user"
 
 static
 VOID

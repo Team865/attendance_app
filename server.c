@@ -59,20 +59,96 @@ Return Value:
     if (Event == MG_EV_HTTP_MSG)
 	{
 		struct mg_http_message* HttpMessage = EventData;
-		LOG("Serving host %s", mg_http_host);
-        if (mg_http_match_uri(
-            HttpMessage,
-			"/api/test"
-            ))
+		struct mg_str* Host = mg_http_get_header(HttpMessage, "Host");
+
+		LOG("Serving host %s\n", Host->ptr);
+		if (mg_http_match_uri(
+				HttpMessage,
+				MAKE_ENDPOINT(TEST_ENDPOINT)
+                ))
 		{
-			LOG("Received request:\n%s\n", HttpMessage->message.ptr);
 			mg_http_reply(
 				Connection,
 				200,
 				"Content-Type: text/plain\r\n",
-				"yes\n"
+				"yes"
                 );
-        }
+		}
+		else if (mg_http_match_uri(
+					 HttpMessage,
+					 MAKE_ENDPOINT(SEND_USER_ENDPOINT)
+                     ))
+		{
+			char NameRaw[128];
+			char Name[128];
+			char Number[9];
+			int NameLen;
+			int NumberLen;
+
+            LOG("Handling send_user\n");
+
+            NameLen = mg_http_get_var(
+				&HttpMessage->query,
+				"name",
+				NameRaw,
+				ARRAY_SIZE(NameRaw)
+                );
+            NumberLen = mg_http_get_var(
+                &HttpMessage->query,
+				"number",
+                Number,
+				ARRAY_SIZE(Number)
+                );
+			if (NameLen > 0 && NumberLen > 0)
+			{
+				mg_url_decode(
+                    NameRaw,
+                    ARRAY_SIZE(NameRaw),
+                    Name,
+                    ARRAY_SIZE(Name),
+                    true
+                    );
+				LOG("Received name %s and number %s\n", Name, Number);
+                mg_http_reply(
+                    Connection,
+                    200,
+					"Content-Type: text/plain\r\n",
+                    "success %s %s",
+                    Name,
+                    Number
+                    );
+			}
+			else if (NameLen > 0 && NumberLen <= 0)
+			{
+				LOG("Invalid number (query %s)\n", HttpMessage->query.ptr);
+				mg_http_reply(
+                    Connection,
+                    400,
+					"Content-Type: text/plain\r\n",
+					"Invalid number"
+                    );
+            }
+			else if (NameLen <= 0 && NumberLen > 0)
+			{
+				LOG("Invalid name (query %s)\n", HttpMessage->query.ptr);
+				mg_http_reply(
+					Connection,
+					400,
+					"Content-Type: text/plain\r\n",
+					"Invalid name"
+                    );
+			}
+			else if (NameLen <= 0 && NumberLen <= 0)
+			{
+				LOG("Invalid name and number (query %s)\n", HttpMessage->query.ptr);
+				mg_http_reply(
+					Connection,
+					400,
+					"Content-Type: text/plain\r\n",
+					"Invalid name and number"
+                    );
+			}
+		}
 		else
 		{
 			LOG("Serving static content in " ROOT_DIR "/" STATIC_PAGE "\n");
