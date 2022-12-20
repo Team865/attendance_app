@@ -1,0 +1,12 @@
+.cache
+.ccls-cache
+.vs
+
+*build*
+
+compile_commands.json
+
+*.aps
+
+*.log
+
