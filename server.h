@@ -58,7 +58,7 @@ Revision History:
 // Default port
 //
 
-#define DEFAULT_PORT 80
+#define DEFAULT_PORT 8000
 
 //
 // Poll rate (milliseconds)
@@ -105,14 +105,14 @@ Revision History:
 static
 VOID
 HandleEvent(
-	struct mg_connection* Connection,
-	INT Event,
-	PVOID EventData,
-	PVOID Data
+    struct mg_connection* Connection,
+    INT Event,
+    PVOID EventData,
+    PVOID Data
     );
 
 INT
 main(
-	IN INT argc,
-	IN PCHAR argv[]
+    IN INT argc,
+    IN PCHAR argv[]
     );
