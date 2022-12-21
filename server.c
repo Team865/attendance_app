@@ -234,6 +234,10 @@ Return Value:
     LOG("Initializing\n");
     mg_mgr_init(&Manager);
 
+    LOG("Registering signal handlers\n");
+	signal(SIGINT, HandleSignal);
+	signal(SIGTERM, HandleSignal);
+
     LOG("Loading configuration " CONFIG_FILE "\n");
 	ConfigFile = fopen(
 		CONFIG_FILE,
