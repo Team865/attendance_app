@@ -7,14 +7,16 @@ if (MSVC)
     add_compile_options(-wd4142)
 endif()
 
-include_directories(deps/mongoose)
-add_library(mongoose STATIC deps/mongoose/mongoose.c deps/mongoose/mongoose.h)
+include_directories(deps/mongoose
+                    deps/tomlc99)
+
+add_library(mongoose STATIC deps/mongoose/mongoose.h deps/mongoose/mongoose.c)
+add_library(tomlc99 STATIC deps/tomlc99/toml.h deps/tomlc99/toml.c)
 
 set(HEADERS server.h types.h)
 set(SOURCES server.c)
 set(DATA index.html)
 add_executable(AttendanceServer ${HEADERS} ${SOURCES} ${DATA})
-target_link_libraries(AttendanceServer PRIVATE mongoose)
+target_link_libraries(AttendanceServer PRIVATE mongoose tomlc99)
 set_target_properties(AttendanceServer PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_directory_properties(PROPERTIES VS_STARTUP_PROJECT AttendanceServer)
-

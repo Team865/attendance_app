@@ -16,6 +16,14 @@ Author:
 
 Revision History:
 
+    21-Dec-2022    MobSlicer152
+
+        Add config file.
+
+    20-Dec-2022    MobSlicer152
+
+        Add API.
+
     19-Dec-2022    MobSlicer152
 
         Created.
@@ -24,13 +32,18 @@ Revision History:
 
 #include "server.h"
 
+PCHAR SpreadsheetId;
+PCHAR GoogleKey;
+UINT16 Port;
+INT PollRate;
+
 static
 VOID
 HandleEvent(
-    struct mg_connection* Connection,
-    INT Event,
-    PVOID EventData,
-    PVOID Data
+    IN struct mg_connection* Connection,
+	IN INT Event,
+	IN PVOID EventData,
+	IN PVOID Data
     )
 /*++
 
@@ -101,7 +114,7 @@ Return Value:
                 );
             if (NameLen > 0 && NumberLen > 0)
             {
-                mg_url_decode(
+                NameLen = mg_url_decode(
                     NameRaw,
                     ARRAY_SIZE(NameRaw),
                     Name,
@@ -118,17 +131,6 @@ Return Value:
                     Number
                     );
             }
-            else if (NameLen > 0 && NumberLen <= 0)
-            {
-                LOG("Invalid number (query %s)\n", HttpMessage->query.ptr);
-                mg_http_reply(
-                    Connection,
-                    400,
-                    "Content-Type: text/plain\r\n",
-                    "Invalid number (query %s)\n",
-                    HttpMessage->query.ptr
-                    );
-            }
             else if (NameLen <= 0 && NumberLen > 0)
             {
                 LOG("Invalid name (query %s)\n", HttpMessage->query.ptr);
@@ -137,6 +139,17 @@ Return Value:
                     400,
                     "Content-Type: text/plain\r\n",
                     "Invalid name (query %s)\n",
+                    HttpMessage->query.ptr
+                    );
+            }
+            else if (NameLen > 0 && NumberLen <= 0)
+            {
+                LOG("Invalid number (query %s)\n", HttpMessage->query.ptr);
+                mg_http_reply(
+                    Connection,
+                    400,
+                    "Content-Type: text/plain\r\n",
+                    "Invalid number (query %s)\n",
                     HttpMessage->query.ptr
                     );
             }
@@ -163,10 +176,28 @@ Return Value:
                 );
         }
     }
-    else
-    {
-        //LOG("Ignoring event %d\n", Event);
-    }
+}
+
+static INT LastSignal;
+static
+VOID
+HandleSignal(
+    IN INT Signal
+    )
+/*++
+
+Routine Description:
+
+    Saves signals so the server can exit cleanly.
+
+Arguments:
+
+    Signal
+
+--*/
+{
+	LastSignal = Signal;
+	LOG("Received signal %d\n", LastSignal);
 }
 
 INT
@@ -193,28 +224,123 @@ Return Value:
 --*/
 {
     struct mg_mgr Manager;
+	FILE* ConfigFile;
+	toml_table_t* Config = NULL;
+	toml_table_t* Server;
+	char TomlErrorBuffer[128];
+	toml_datum_t TomlDatum;
+	CHAR Url[128];
 
     LOG("Initializing\n");
     mg_mgr_init(&Manager);
 
-    LOG("Listening on port :" STRINGIZE_EXPAND(DEFAULT_PORT) "\n");
+    LOG("Loading configuration " CONFIG_FILE "\n");
+	ConfigFile = fopen(
+		CONFIG_FILE,
+		"r"
+        );
+	if (!ConfigFile)
+	{
+		LOG("Failed to open " CONFIG_FILE ": %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+    }
+
+    Config = toml_parse_file(
+        ConfigFile,
+        TomlErrorBuffer,
+        ARRAY_SIZE(TomlErrorBuffer)
+        );
+	fclose(ConfigFile);
+
+    LOG("Parsing config\n");
+    Server = toml_table_in(
+        Config,
+        "server"
+        );
+	if (!Server)
+	{
+		LOG("Config missing [server]: %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+    }
+
+    TomlDatum = toml_string_in(
+        Server,
+        "spreadsheet_id"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.spreadsheet_id: %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+    }
+	SpreadsheetId = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"google_key"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.google_key: %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+	}
+	GoogleKey = TomlDatum.u.s;
+
+	TomlDatum = toml_int_in(
+		Server,
+		"port"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.port: %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+	}
+	Port = TomlDatum.u.i;
+
+	TomlDatum = toml_int_in(
+		Server,
+		"poll_rate"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.poll_rate: %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+	}
+	PollRate = TomlDatum.u.i;
+
+    snprintf(
+        Url,
+        128,
+        "localhost:%hu",
+        Port
+        );
+
+    LOG("Listening on port :%hu\n", Port);
     mg_http_listen(
         &Manager,
-        "http://localhost:" STRINGIZE_EXPAND(DEFAULT_PORT),
+        Url,
         HandleEvent,
         &Manager
         );
 
-    LOG("Polling every " STRINGIZE_EXPAND(POLL_RATE) "ms\n");
-    while (1)
+    LOG("Polling every %dms\n", PollRate);
+    while (LastSignal == 0)
     {
         mg_mgr_poll(
             &Manager,
-            POLL_RATE
+            PollRate
             );
     }
 
-    LOG("Shutting down\n");
+    errno = 0;
+Cleanup:
+	LOG("Shutting down\n");
+
+    if (Config)
+	{
+		LOG("Freeing config file\n");
+		toml_free(Config);
+	}
+
     mg_mgr_free(&Manager);
-    return 0;
+    return errno;
 }

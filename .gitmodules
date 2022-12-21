@@ -1,3 +1,6 @@
 [submodule "deps/mongoose"]
 	path = deps/mongoose
 	url = https://github.com/cesanta/mongoose.git
+[submodule "deps/tomlc99"]
+	path = deps/tomlc99
+	url = https://github.com/cktan/tomlc99

@@ -16,6 +16,14 @@ Author:
 
 Revision History:
 
+    21-Dec-2022    MobSlicer152
+
+        Switch some preprocessor macros to being in a config file.
+
+    20-Dec-2022    MobSlicer152
+
+        Add more definitions.
+
     19-Dec-2022    MobSlicer152
 
         Created.
@@ -32,6 +40,7 @@ Revision History:
 #include <string.h>
 
 #include "mongoose.h"
+#include "toml.h"
 
 #include "types.h"
 
@@ -40,6 +49,12 @@ Revision History:
 //
 
 #define LOG(...) fprintf(stderr, "SERVER: " __VA_ARGS__);
+
+//
+// Format string arguments for errno errors
+//
+
+#define ERRNO_STRING() strerror(errno), errno
 
 //
 // Make a string
@@ -55,16 +70,10 @@ Revision History:
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 //
-// Default port
+// Config file
 //
 
-#define DEFAULT_PORT 8000
-
-//
-// Poll rate (milliseconds)
-//
-
-#define POLL_RATE 1000
+#define CONFIG_FILE "config.toml"
 
 //
 // Root directory of files
@@ -102,14 +111,68 @@ Revision History:
 
 #define SEND_USER_ENDPOINT "send_user"
 
+//
+// Google Sheets spreadsheet ID to send user input to
+//
+
+extern PCHAR SpreadsheetId;
+
+//
+// Google API key
+//
+
+extern PCHAR GoogleKey;
+
+//
+// Port
+//
+
+extern UINT16 Port;
+
+//
+// Polling rate
+//
+
+extern INT PollRate;
+
+//
+// Handle server events
+//
+
 static
 VOID
 HandleEvent(
-    struct mg_connection* Connection,
-    INT Event,
-    PVOID EventData,
-    PVOID Data
+	IN struct mg_connection* Connection,
+	IN INT Event,
+	IN PVOID EventData,
+	IN PVOID Data
     );
+
+//
+// Signal handler
+//
+
+static
+VOID
+HandleSignal(
+	IN INT Signal
+    );
+
+//
+// Send user input to a spreadsheet
+//
+
+VOID
+SendUser(
+	IN PCCHAR Name,
+	IN INT NameLen,
+	IN PCCHAR Number,
+	IN INT NumberLen
+    );
+
+//
+// Main
+//
 
 INT
 main(

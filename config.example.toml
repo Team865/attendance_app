@@ -1,0 +1,5 @@
+[server]
+spreadsheet_id = "example"
+google_key = "example"
+port = 80
+poll_rate = 1000
