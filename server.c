@@ -34,6 +34,8 @@ Revision History:
 
 PCHAR SpreadsheetId;
 PCHAR GoogleKey;
+PCHAR TlsCertPath;
+PCHAR TlsKeyPath;
 UINT16 Port;
 INT PollRate;
 
@@ -69,10 +71,44 @@ Return Value:
 {
     struct mg_http_serve_opts StaticOptions = {.root_dir = ROOT_DIR};
 
-    if (Event == MG_EV_HTTP_MSG)
+    if (Event == MG_EV_ACCEPT)
+	{
+		struct mg_tls_opts TlsOptions = {
+			.cert = TlsCertPath,
+			.certkey = TlsKeyPath
+        };
+
+        mg_tls_init(
+            Connection,
+            &TlsOptions
+            );
+    }
+    else if (Event == MG_EV_HTTP_MSG)
     {
         struct mg_http_message* HttpMessage = EventData;
         struct mg_str* Host = mg_http_get_header(HttpMessage, "Host");
+		CHAR Query[128];
+		PCHAR p;
+
+        p = NULL;
+		if (HttpMessage->query.ptr)
+		{
+			p = strstr(HttpMessage->query.ptr, " HTTP");
+			if (p)
+			{
+                size_t Count = MIN(
+						p - HttpMessage->query.ptr,
+						ARRAY_SIZE(Query) - 1
+                        );
+
+				strncpy(
+					Query,
+					HttpMessage->query.ptr,
+					Count
+                    );
+				Query[Count] = 0;
+            }
+		}
 
         LOG("Serving host %s\n", Host->ptr);
         if (mg_http_match_uri(
@@ -92,11 +128,12 @@ Return Value:
                      MAKE_ENDPOINT(SEND_USER_ENDPOINT)
                      ))
         {
-            char NameRaw[128];
-            char Name[128];
-            char Number[10];
-            int NameLen;
-            int NumberLen;
+            CHAR NameRaw[128];
+            CHAR Name[128];
+            CHAR Number[10];
+			PCCHAR Warning;
+            INT NameLen;
+            INT NumberLen;
 
             LOG("Handling send_user\n");
 
@@ -122,46 +159,54 @@ Return Value:
                     true
                     );
                 LOG("Received name %s and number %s\n", Name, Number);
+
+                // Warnings must start with a newline for frontend
+				if (atoi(Number) < 100000000)
+					Warning = "\nNumber is invalid or less than 9 digits";
+				else
+					Warning = "";
+
                 mg_http_reply(
                     Connection,
                     200,
                     "Content-Type: text/plain\r\n",
-                    "success\n%s\n%s",
+                    "success\n%s\n%s%s",
                     Name,
-                    Number
+                    Number,
+                    Warning
                     );
             }
             else if (NameLen <= 0 && NumberLen > 0)
             {
-                LOG("Invalid name (query %s)\n", HttpMessage->query.ptr);
+				LOG("Invalid name (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
                     Connection,
                     400,
                     "Content-Type: text/plain\r\n",
                     "Invalid name (query %s)\n",
-                    HttpMessage->query.ptr
+					p ? Query : "(none)"
                     );
             }
             else if (NameLen > 0 && NumberLen <= 0)
             {
-                LOG("Invalid number (query %s)\n", HttpMessage->query.ptr);
+				LOG("Invalid number (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
                     Connection,
                     400,
                     "Content-Type: text/plain\r\n",
                     "Invalid number (query %s)\n",
-                    HttpMessage->query.ptr
+					p ? Query : "(none)"
                     );
             }
             else if (NameLen <= 0 && NumberLen <= 0)
             {
-                LOG("Invalid name and number (query %s)\n", HttpMessage->query.ptr);
+				LOG("Invalid name and number (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
                     Connection,
                     400,
                     "Content-Type: text/plain\r\n",
                     "Invalid name and number (query %s)\n",
-                    HttpMessage->query.ptr
+					p ? Query : "(none)"
                     );
             }
         }
@@ -263,7 +308,7 @@ Return Value:
         );
 	if (!Server)
 	{
-		LOG("Config missing [server]: %s (errno %d)\n", ERRNO_STRING());
+		LOG("Config missing [server]: %s\n", TomlErrorBuffer);
 		goto Cleanup;
     }
 
@@ -273,7 +318,7 @@ Return Value:
         );
 	if (!TomlDatum.ok)
 	{
-		LOG("Config missing server.spreadsheet_id: %s (errno %d)\n", ERRNO_STRING());
+		LOG("Config missing server.spreadsheet_id: %s\n", TomlErrorBuffer);
 		goto Cleanup;
     }
 	SpreadsheetId = TomlDatum.u.s;
@@ -284,10 +329,32 @@ Return Value:
         );
 	if (!TomlDatum.ok)
 	{
-		LOG("Config missing server.google_key: %s (errno %d)\n", ERRNO_STRING());
+		LOG("Config missing server.google_key: %s\n", TomlErrorBuffer);
 		goto Cleanup;
 	}
 	GoogleKey = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"tls_cert_path"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.tls_cert_path: %s\n", TomlErrorBuffer);
+		goto Cleanup;
+	}
+	TlsCertPath = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"tls_key_path"
+        );
+	if (!TomlDatum.ok)
+	{
+		LOG("Config missing server.tls_key_path: %s\n", TomlErrorBuffer);
+		goto Cleanup;
+	}
+	TlsKeyPath = TomlDatum.u.s;
 
 	TomlDatum = toml_int_in(
 		Server,
@@ -295,7 +362,7 @@ Return Value:
         );
 	if (!TomlDatum.ok)
 	{
-		LOG("Config missing server.port: %s (errno %d)\n", ERRNO_STRING());
+		LOG("Config missing server.port: %s\n", TomlErrorBuffer);
 		goto Cleanup;
 	}
 	Port = TomlDatum.u.i;
@@ -306,7 +373,7 @@ Return Value:
         );
 	if (!TomlDatum.ok)
 	{
-		LOG("Config missing server.poll_rate: %s (errno %d)\n", ERRNO_STRING());
+		LOG("Config missing server.poll_rate: %s\n", TomlErrorBuffer);
 		goto Cleanup;
 	}
 	PollRate = TomlDatum.u.i;
@@ -317,6 +384,10 @@ Return Value:
         "localhost:%hu",
         Port
         );
+
+	LOG("Using spreadsheet ID %s\n", SpreadsheetId);
+	LOG("Using TLS certificate in %s\n", TlsCertPath);
+	LOG("Using TLS private key in %s\n", TlsKeyPath);
 
     LOG("Listening on port :%hu\n", Port);
     mg_http_listen(

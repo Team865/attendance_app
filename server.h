@@ -64,6 +64,24 @@ Revision History:
 #define STRINGIZE_EXPAND(x) STRINGIZE(x)
 
 //
+// Smaller of two values
+//
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+//
+// Larger of two values
+//
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+//
+// Clamp to range
+//
+
+#define CLAMP(x, min, max) ((x) < (max) && (x) > (min) ? (x) : (x) > (max) ? (x) < (min) ? (min) : (x) : (max))
+
+//
 // Get the number of elements in an array
 //
 
@@ -122,6 +140,18 @@ extern PCHAR SpreadsheetId;
 //
 
 extern PCHAR GoogleKey;
+
+//
+// TLS certificate path
+//
+
+extern PCHAR TlsCertPath;
+
+//
+// TLS private key file path
+//
+
+extern PCHAR TlsKeyPath;
 
 //
 // Port

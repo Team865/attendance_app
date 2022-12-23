@@ -1,5 +1,7 @@
 [server]
 spreadsheet_id = "example"
 google_key = "example"
-port = 80
+tls_cert_path = "cert.pem"
+tls_key_path = "key.pem"
+port = 443
 poll_rate = 1000

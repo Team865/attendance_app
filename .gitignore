@@ -11,4 +11,5 @@ compile_commands.json
 *.log
 
 config.toml
+*.pem
 
