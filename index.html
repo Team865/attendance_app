@@ -2,7 +2,10 @@
 
 <script>
     function sendUser(name, number) {
-        console.log("Sending user", name, number);
+        // Number can't be more than 9 characters
+        number = number.substring(0, 9);
+
+        console.log("Sending user", encodeURI(name), encodeURI(number));
         let xmlHttp = new XMLHttpRequest();
         xmlHttp.open("get", "/api/send_user?name=" + encodeURI(name) + "&number=" + encodeURI(number), false);
         xmlHttp.send(null);

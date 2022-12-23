@@ -88,6 +88,7 @@ Return Value:
         struct mg_http_message* HttpMessage = EventData;
         struct mg_str* Host = mg_http_get_header(HttpMessage, "Host");
 		CHAR Query[128];
+		struct mg_str QueryMgStr;
 		PCHAR p;
 
         p = NULL;
@@ -107,6 +108,9 @@ Return Value:
 					Count
                     );
 				Query[Count] = 0;
+
+                QueryMgStr.ptr = Query;
+				QueryMgStr.len = Count;
             }
 		}
 
@@ -128,9 +132,8 @@ Return Value:
                      MAKE_ENDPOINT(SEND_USER_ENDPOINT)
                      ))
         {
-            CHAR NameRaw[128];
-            CHAR Name[128];
-            CHAR Number[10];
+			CHAR Name[128];
+			CHAR Number[10];
 			PCCHAR Warning;
             INT NameLen;
             INT NumberLen;
@@ -138,26 +141,23 @@ Return Value:
             LOG("Handling send_user\n");
 
             NameLen = mg_http_get_var(
-                &HttpMessage->query,
+				&QueryMgStr,
                 "name",
-                NameRaw,
-                ARRAY_SIZE(NameRaw)
+                Name,
+                ARRAY_SIZE(Name)
                 );
+			if (NameLen == -3)
+				NameLen = strlen(Name);
             NumberLen = mg_http_get_var(
-                &HttpMessage->query,
+				&QueryMgStr,
                 "number",
-                Number,
-                ARRAY_SIZE(Number)
+				Number,
+				ARRAY_SIZE(Number)
                 );
+			if (NumberLen == -3)
+				NumberLen = strlen(Number);
             if (NameLen > 0 && NumberLen > 0)
-            {
-                NameLen = mg_url_decode(
-                    NameRaw,
-                    ARRAY_SIZE(NameRaw),
-                    Name,
-                    ARRAY_SIZE(Name),
-                    true
-                    );
+			{
                 LOG("Received name %s and number %s\n", Name, Number);
 
                 // Warnings must start with a newline for frontend
