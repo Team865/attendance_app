@@ -39,7 +39,9 @@ Revision History:
 #include <stdlib.h>
 #include <string.h>
 
+#include "curl/curl.h"
 #include "mongoose.h"
+#include "oauth2.h"
 #include "toml.h"
 
 #include "types.h"
@@ -136,10 +138,10 @@ Revision History:
 extern PCHAR SpreadsheetId;
 
 //
-// Google API key
+// Google OAuth2 Client JSON file
 //
 
-extern PCHAR GoogleKey;
+extern PCHAR GoogleOauth2Json;
 
 //
 // TLS certificate path
@@ -169,7 +171,6 @@ extern INT PollRate;
 // Handle server events
 //
 
-static
 VOID
 HandleEvent(
 	IN struct mg_connection* Connection,
@@ -182,7 +183,6 @@ HandleEvent(
 // Signal handler
 //
 
-static
 VOID
 HandleSignal(
 	IN INT Signal
@@ -198,6 +198,15 @@ SendUser(
 	IN INT NameLen,
 	IN PCCHAR Number,
 	IN INT NumberLen
+    );
+
+//
+// Authenticate with Google
+//
+
+BOOLEAN
+AuthenticateGoogle(
+    VOID
     );
 
 //

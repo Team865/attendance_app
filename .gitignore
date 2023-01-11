@@ -12,4 +12,5 @@ compile_commands.json
 
 config.toml
 *.pem
+client_secret_*.apps.googleusercontent.com.json
 

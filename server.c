@@ -33,13 +33,12 @@ Revision History:
 #include "server.h"
 
 PCHAR SpreadsheetId;
-PCHAR GoogleKey;
+PCHAR GoogleOauth2Json;
 PCHAR TlsCertPath;
 PCHAR TlsKeyPath;
 UINT16 Port;
 INT PollRate;
 
-static
 VOID
 HandleEvent(
     IN struct mg_connection* Connection,
@@ -71,7 +70,7 @@ Return Value:
 {
     struct mg_http_serve_opts StaticOptions = {.root_dir = ROOT_DIR};
 
-    if (Event == MG_EV_ACCEPT)
+    if ( Event == MG_EV_ACCEPT )
 	{
 		struct mg_tls_opts TlsOptions = {
 			.cert = TlsCertPath,
@@ -83,7 +82,7 @@ Return Value:
             &TlsOptions
             );
     }
-    else if (Event == MG_EV_HTTP_MSG)
+    else if ( Event == MG_EV_HTTP_MSG )
     {
         struct mg_http_message* HttpMessage = EventData;
         struct mg_str* Host = mg_http_get_header(HttpMessage, "Host");
@@ -92,10 +91,10 @@ Return Value:
 		PCHAR p;
 
         p = NULL;
-		if (HttpMessage->query.ptr)
+		if ( HttpMessage->query.ptr )
 		{
 			p = strstr(HttpMessage->query.ptr, " HTTP");
-			if (p)
+			if ( p )
 			{
                 size_t Count = MIN(
 						p - HttpMessage->query.ptr,
@@ -115,10 +114,10 @@ Return Value:
 		}
 
         LOG("Serving host %s\n", Host->ptr);
-        if (mg_http_match_uri(
-                HttpMessage,
-                MAKE_ENDPOINT(TEST_ENDPOINT)
-                ))
+        if ( mg_http_match_uri(
+                 HttpMessage,
+                 MAKE_ENDPOINT(TEST_ENDPOINT)
+                 ) )
         {
             mg_http_reply(
                 Connection,
@@ -127,10 +126,10 @@ Return Value:
                 "yes"
                 );
         }
-        else if (mg_http_match_uri(
-                     HttpMessage,
-                     MAKE_ENDPOINT(SEND_USER_ENDPOINT)
-                     ))
+        else if ( mg_http_match_uri(
+                      HttpMessage,
+                      MAKE_ENDPOINT(SEND_USER_ENDPOINT)
+                      ) )
         {
 			CHAR Name[128];
 			CHAR Number[10];
@@ -146,7 +145,7 @@ Return Value:
                 Name,
                 ARRAY_SIZE(Name)
                 );
-			if (NameLen == -3)
+			if ( NameLen == -3 )
 				NameLen = strlen(Name);
             NumberLen = mg_http_get_var(
 				&QueryMgStr,
@@ -154,14 +153,14 @@ Return Value:
 				Number,
 				ARRAY_SIZE(Number)
                 );
-			if (NumberLen == -3)
+			if ( NumberLen == -3 )
 				NumberLen = strlen(Number);
-            if (NameLen > 0 && NumberLen > 0)
+            if ( NameLen > 0 && NumberLen > 0 )
 			{
                 LOG("Received name %s and number %s\n", Name, Number);
 
                 // Warnings must start with a newline for frontend
-				if (atoi(Number) < 100000000)
+				if ( atoi(Number) < 100000000 )
 					Warning = "\nNumber is invalid or less than 9 digits";
 				else
 					Warning = "";
@@ -176,7 +175,7 @@ Return Value:
                     Warning
                     );
             }
-            else if (NameLen <= 0 && NumberLen > 0)
+            else if ( NameLen <= 0 && NumberLen > 0 )
             {
 				LOG("Invalid name (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
@@ -187,7 +186,7 @@ Return Value:
 					p ? Query : "(none)"
                     );
             }
-            else if (NameLen > 0 && NumberLen <= 0)
+            else if ( NameLen > 0 && NumberLen <= 0 )
             {
 				LOG("Invalid number (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
@@ -198,7 +197,7 @@ Return Value:
 					p ? Query : "(none)"
                     );
             }
-            else if (NameLen <= 0 && NumberLen <= 0)
+            else if ( NameLen <= 0 && NumberLen <= 0 )
             {
 				LOG("Invalid name and number (query %s)\n", p ? Query : "(none)");
                 mg_http_reply(
@@ -224,7 +223,6 @@ Return Value:
 }
 
 static INT LastSignal;
-static
 VOID
 HandleSignal(
     IN INT Signal
@@ -288,7 +286,7 @@ Return Value:
 		CONFIG_FILE,
 		"r"
         );
-	if (!ConfigFile)
+	if ( !ConfigFile )
 	{
 		LOG("Failed to open " CONFIG_FILE ": %s (errno %d)\n", ERRNO_STRING());
 		goto Cleanup;
@@ -306,7 +304,7 @@ Return Value:
         Config,
         "server"
         );
-	if (!Server)
+	if ( !Server )
 	{
 		LOG("Config missing [server]: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -316,7 +314,7 @@ Return Value:
         Server,
         "spreadsheet_id"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
 		LOG("Config missing server.spreadsheet_id: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -325,20 +323,20 @@ Return Value:
 
 	TomlDatum = toml_string_in(
 		Server,
-		"google_key"
+		"google_oauth2_json"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
-		LOG("Config missing server.google_key: %s\n", TomlErrorBuffer);
+		LOG("Config missing server.google_oauth2_json: %s\n", TomlErrorBuffer);
 		goto Cleanup;
 	}
-	GoogleKey = TomlDatum.u.s;
+	GoogleOauth2Json = TomlDatum.u.s;
 
 	TomlDatum = toml_string_in(
 		Server,
 		"tls_cert_path"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
 		LOG("Config missing server.tls_cert_path: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -349,7 +347,7 @@ Return Value:
 		Server,
 		"tls_key_path"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
 		LOG("Config missing server.tls_key_path: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -360,7 +358,7 @@ Return Value:
 		Server,
 		"port"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
 		LOG("Config missing server.port: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -371,7 +369,7 @@ Return Value:
 		Server,
 		"poll_rate"
         );
-	if (!TomlDatum.ok)
+	if ( !TomlDatum.ok )
 	{
 		LOG("Config missing server.poll_rate: %s\n", TomlErrorBuffer);
 		goto Cleanup;
@@ -386,6 +384,7 @@ Return Value:
         );
 
 	LOG("Using spreadsheet ID %s\n", SpreadsheetId);
+	LOG("Using OAuth2 client data in %s\n", GoogleOauth2Json);
 	LOG("Using TLS certificate in %s\n", TlsCertPath);
 	LOG("Using TLS private key in %s\n", TlsKeyPath);
 
@@ -396,6 +395,9 @@ Return Value:
         HandleEvent,
         &Manager
         );
+
+    if ( !AuthenticateGoogle() )
+        goto Cleanup;
 
     LOG("Polling every %dms\n", PollRate);
     while (LastSignal == 0)
@@ -410,7 +412,7 @@ Return Value:
 Cleanup:
 	LOG("Shutting down\n");
 
-    if (Config)
+    if ( Config )
 	{
 		LOG("Freeing config file\n");
 		toml_free(Config);
