@@ -40,8 +40,9 @@ Revision History:
 #include <string.h>
 
 #include "curl/curl.h"
+#include "psa/crypto.h"
+#include "mbedtls/sha256.h"
 #include "mongoose.h"
-#include "oauth2.h"
 #include "toml.h"
 
 #include "types.h"
@@ -132,6 +133,12 @@ Revision History:
 #define SEND_USER_ENDPOINT "send_user"
 
 //
+// Used for authentication
+//
+
+#define OAUTH_ENDPOINT "oauth_receive"
+
+//
 // Google Sheets spreadsheet ID to send user input to
 //
 
@@ -141,7 +148,13 @@ extern PCHAR SpreadsheetId;
 // Google OAuth2 Client JSON file
 //
 
-extern PCHAR GoogleOauth2Json;
+extern PCHAR GoogleOauth2Client;
+
+//
+// Google OAuth2 token
+//
+
+extern PCHAR GoogleOauth2Token;
 
 //
 // TLS certificate path
@@ -173,10 +186,10 @@ extern INT PollRate;
 
 VOID
 HandleEvent(
-	IN struct mg_connection* Connection,
-	IN INT Event,
-	IN PVOID EventData,
-	IN PVOID Data
+    IN struct mg_connection* Connection,
+    IN INT Event,
+    IN PVOID EventData,
+    IN PVOID Data
     );
 
 //
@@ -185,7 +198,7 @@ HandleEvent(
 
 VOID
 HandleSignal(
-	IN INT Signal
+    IN INT Signal
     );
 
 //
@@ -194,10 +207,10 @@ HandleSignal(
 
 VOID
 SendUser(
-	IN PCCHAR Name,
-	IN INT NameLen,
-	IN PCCHAR Number,
-	IN INT NumberLen
+    IN PCCHAR Name,
+    IN INT NameLen,
+    IN PCCHAR Number,
+    IN INT NumberLen
     );
 
 //

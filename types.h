@@ -26,6 +26,7 @@ Revision History:
 
 #include <inttypes.h>
 #include <stddef.h>
+#include <wchar.h>
 
 //
 // Dummy macros
@@ -43,14 +44,14 @@ Revision History:
 typedef char CHAR;
 typedef unsigned char UCHAR;
 typedef UCHAR BYTE;
-typedef bool BOOLEAN;
+typedef unsigned char BOOLEAN;
 typedef int INT;
 typedef unsigned int UINT;
 typedef float FLOAT;
 typedef double DOUBLE;
 typedef int8_t INT8;
 typedef int16_t INT16;
-typedef INT16 WCHAR;
+typedef wchar_t WCHAR;
 typedef int32_t INT32;
 typedef int64_t INT64;
 typedef intptr_t INTPTR;

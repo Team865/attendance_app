@@ -1,6 +1,7 @@
 [server]
 spreadsheet_id = "example"
-google_key = "example"
+google_oauth2_client = "example"
+google_oauth2_token = "example"
 tls_cert_path = "cert.pem"
 tls_key_path = "key.pem"
 port = 443

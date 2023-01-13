@@ -7,9 +7,6 @@
 [submodule "deps/mbedtls"]
 	path = deps/mbedtls
 	url = https://github.com/Mbed-TLS/mbedtls
-[submodule "deps/oauth2"]
-	path = deps/oauth2
-	url = https://github.com/slugonamission/OAuth2
 [submodule "deps/curl"]
 	path = deps/curl
 	url = https://github.com/curl/curl
