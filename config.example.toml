@@ -6,3 +6,5 @@ tls_cert_path = "cert.pem"
 tls_key_path = "key.pem"
 port = 443
 poll_rate = 1000
+email = "email@email.email"
+

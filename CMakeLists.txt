@@ -7,7 +7,8 @@ if (MSVC)
     add_compile_options(-wd4142)
 endif()
 
-include_directories(deps/curl/include
+include_directories(deps/cjson
+                    deps/curl/include
                     deps/mbedtls/include
                     deps/mongoose
                     deps/tomlc99)
@@ -18,6 +19,8 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING_SHARED OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING_STATIC OFF CACHE BOOL "" FORCE)
+set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
+add_subdirectory(deps/cjson)
 add_subdirectory(deps/curl)
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
@@ -31,6 +34,6 @@ set(HEADERS server.h types.h)
 set(SOURCES server.c)
 set(DATA index.html)
 add_executable(AttendanceServer ${HEADERS} ${SOURCES} ${DATA})
-target_link_libraries(AttendanceServer PRIVATE libcurl mbedtls mbedcrypto mbedx509 mongoose tomlc99)
+target_link_libraries(AttendanceServer PRIVATE cjson libcurl mbedtls mbedcrypto mbedx509 mongoose tomlc99)
 set_target_properties(AttendanceServer PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_directory_properties(PROPERTIES VS_STARTUP_PROJECT AttendanceServer)

@@ -39,6 +39,20 @@ Revision History:
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+// Not windows.h because mongoose redefines things
+#define _AMD64_
+#include <windef.h>
+#include <WinBase.h>
+#include <processthreadsapi.h>
+
+#define strdup _strdup
+#else
+#include <unistd.h>
+#include <pthread.h>
+#endif
+
+#include "cJSON.h"
 #include "curl/curl.h"
 #include "psa/crypto.h"
 #include "mbedtls/sha256.h"
@@ -148,7 +162,31 @@ extern PCHAR SpreadsheetId;
 // Google OAuth2 Client JSON file
 //
 
-extern PCHAR GoogleOauth2Client;
+extern PCHAR GoogleOauth2ClientJson;
+
+//
+// Google OAuth2 authentication URI
+//
+
+extern PCHAR GoogleOauth2AuthUri;
+
+//
+// Google OAuth2 token URI
+//
+
+extern PCHAR GoogleOauth2TokenUri;
+
+//
+// Google OAuth2 client ID
+//
+
+extern PCHAR GoogleOauth2ClientId;
+
+//
+// Google OAuth2 client secret
+//
+
+extern PCHAR GoogleOauth2ClientSecret;
 
 //
 // Google OAuth2 token
@@ -179,6 +217,12 @@ extern UINT16 Port;
 //
 
 extern INT PollRate;
+
+//
+// The email of the server owner, for Google authentication login_hint
+//
+
+extern PCHAR Email;
 
 //
 // Handle server events
@@ -219,7 +263,7 @@ SendUser(
 
 BOOLEAN
 AuthenticateGoogle(
-    VOID
+    IN PVOID Parameter
     );
 
 //

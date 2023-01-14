@@ -1,0 +1,1 @@
+{"cmake":{"build_type":"Debug","dap_name":"lldb","target":"AttendanceServer","cmd":"cmake","build_dir":"{cwd}\\build\\{os}-{build_type}","args":{"configure":["-D","CMAKE_EXPORT_COMPILE_COMMANDS=1","-G","Ninja"]}},"cargo":{"dap_name":"lldb"}}

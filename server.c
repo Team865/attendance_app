@@ -31,14 +31,23 @@ Revision History:
 --*/
 
 #include "server.h"
+#include "curl/easy.h"
 
+CHAR Url[128];
 PCHAR SpreadsheetId;
-PCHAR GoogleOauth2Client;
+PCHAR GoogleOauth2ClientJson;
+PCHAR GoogleOauth2AuthUri;
+PCHAR GoogleOauth2TokenUri;
+PCHAR GoogleOauth2ClientId;
+PCHAR GoogleOauth2ClientSecret;
 PCHAR GoogleOauth2Token;
 PCHAR TlsCertPath;
 PCHAR TlsKeyPath;
 UINT16 Port;
 INT PollRate;
+PCHAR Email;
+
+CURL* Curl;
 
 VOID
 HandleEvent(
@@ -247,13 +256,15 @@ Arguments:
 
 BOOLEAN
 AuthenticateGoogle(
-    VOID
+    IN PVOID Parameter
     )
 /*++
 
 Routine Description:
 
     This routine gets an OAuth token for the Google Sheets API.
+
+    TODO: Much of the RNG code should be put in a more reusable function.
 
 Arguments:
 
@@ -268,20 +279,25 @@ Return Value:
 --*/
 {
     BYTE RandomBytes[64];
-    CHAR ChallengeCode[129];
-    CHAR ChallengeSha256[65];
-    CHAR ChallengeVerifier[172];
+    //CHAR State[33];
+    CHAR CodeVerifier[129];
+    CHAR CodeSha256[65];
+    CHAR CodeChallenge[172];
     CHAR RequestUrl[1024];
+    CHAR IpAddress[16];
     UINT Error;
     INT i;
 
+    (Parameter);
+
     LOG("Creating challenge code\n");
 
+    CodeVerifier[0] = 0;
     Error = psa_generate_random(
         RandomBytes,
         sizeof(RandomBytes)
         );
-    while (Error != PSA_SUCCESS)
+    while ( Error != PSA_SUCCESS )
     {
         LOG("Random byte generation failed: PSA status %d\n", Error);
         Error = psa_generate_random(
@@ -292,65 +308,392 @@ Return Value:
     for ( i = 0; i < ARRAY_SIZE(RandomBytes); i++ )
     {
         snprintf(
-            ChallengeCode + i * 2,
-            ARRAY_SIZE(ChallengeCode) - i * 2,
+            CodeVerifier + i * 2,
+            ARRAY_SIZE(CodeVerifier) - i * 2,
             "%X",
             RandomBytes[i]
             );
+        if ( !CodeVerifier[i * 2] || !CodeVerifier[i * 2 + 1] )
+    	{
+            CodeVerifier[i * 2] = '0';
+            CodeVerifier[i * 2 + 1] = '0';
+    	}
     }
-    ChallengeCode[ARRAY_SIZE(ChallengeCode) - 1] = 0;
+    CodeVerifier[ARRAY_SIZE(CodeVerifier) - 1] = 0;
 
-    LOG("Encoding challenge verifier \"%s\"\n", ChallengeCode);
+    LOG("Encoding challenge verifier \"%s\"\n", CodeVerifier);
 
     if ( mbedtls_sha256(
-        ChallengeCode,
-        ARRAY_SIZE(ChallengeCode),
-        ChallengeSha256,
+        CodeVerifier,
+        ARRAY_SIZE(CodeVerifier),
+        CodeSha256,
         FALSE
         ) )
     {
-        LOG("Failed to compute SHA256 of %s\n", ChallengeCode);
+        LOG("Failed to compute SHA256 of %s\n", CodeVerifier);
         return FALSE;
     }
     mg_base64_encode(
-        ChallengeSha256,
-        ARRAY_SIZE(ChallengeSha256),
-        ChallengeVerifier
+        CodeSha256,
+        ARRAY_SIZE(CodeSha256),
+        CodeChallenge
         );
     memset(
-        ChallengeSha256,
+        CodeSha256,
         0,
-        sizeof(ChallengeSha256)
+        sizeof(CodeSha256)
         );
     if ( strchr(
-            ChallengeVerifier,
+            CodeChallenge,
             '='
             ) )
     {
         *strchr(
-            ChallengeVerifier,
+            CodeChallenge,
             '='
             ) = 0;
     }
 
-    for ( i = 0; i < ARRAY_SIZE(ChallengeVerifier); i++ )
+    for ( i = 0; i < ARRAY_SIZE(CodeChallenge); i++ )
     {
-        if ( ChallengeVerifier[i] == '+' )
+        if ( CodeChallenge[i] == '+' )
         {
-            ChallengeVerifier[i] = '-';
+            CodeChallenge[i] = '-';
         }
-        else if ( ChallengeVerifier[i] == '/' )
+        else if ( CodeChallenge[i] == '/' )
         {
-            ChallengeVerifier[i] = '_';
+            CodeChallenge[i] = '_';
         }
     }
+
+    strncpy(
+        IpAddress,
+        "127.0.0.1",
+        15
+        );
 
     snprintf(
         RequestUrl,
         ARRAY_SIZE(RequestUrl),
-        "https://www.googleapis.com/oauth2/v4/token?"
+        "%s?"
+        "response_type=code&"
+        "scope=openid%%20profile&"
+        "redirect_uri=https://%s/api/" OAUTH_ENDPOINT "&"
+        "client_id=%s&"
+		"state=&"
+        "code_challenge=%s&"
+        "code_challenge_method=S256&"
+        "login_hint=%s",
+        GoogleOauth2AuthUri,
+        IpAddress,
+        GoogleOauth2ClientId,
+        //State,
+        CodeChallenge,
+        Email
+        );
+
+    LOG("Visit this URL to authenticate: %s\n", RequestUrl);
 
     return TRUE;
+}
+
+BOOLEAN
+ParseConfiguration(
+    VOID
+    )
+/*++
+
+Routine Description:
+
+    This routine parses the server configuration.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    TRUE - The configuration file was successfully parsed.
+
+    FALSE - The configuration file could not be parsed.
+
+--*/
+{
+    BOOLEAN Error;
+	FILE* ConfigFile;
+	toml_table_t* Config = NULL;
+	toml_table_t* Server;
+	char TomlErrorBuffer[128];
+	toml_datum_t TomlDatum;
+
+	Error = FALSE;
+
+	LOG("Loading configuration " CONFIG_FILE "\n");
+	ConfigFile = fopen(
+		CONFIG_FILE,
+		"r"
+        );
+	if ( !ConfigFile )
+	{
+		LOG("Failed to open " CONFIG_FILE ": %s (errno %d)\n", ERRNO_STRING());
+		goto Cleanup;
+	}
+
+	Config = toml_parse_file(
+		ConfigFile,
+		TomlErrorBuffer,
+		ARRAY_SIZE(TomlErrorBuffer)
+        );
+	fclose(ConfigFile);
+
+	LOG("Parsing config\n");
+	Server = toml_table_in(
+		Config,
+		"server"
+        );
+	if ( !Server )
+	{
+		LOG("Config missing [server]: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+
+	TomlDatum = toml_string_in(
+		Server,
+		"spreadsheet_id"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.spreadsheet_id: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	SpreadsheetId = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"google_oauth2_client"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.google_oauth2_client: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	GoogleOauth2ClientJson = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"google_oauth2_token"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.google_oauth2_token: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	GoogleOauth2Token = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"tls_cert_path"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.tls_cert_path: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	TlsCertPath = TomlDatum.u.s;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"tls_key_path"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.tls_key_path: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	TlsKeyPath = TomlDatum.u.s;
+
+	TomlDatum = toml_int_in(
+		Server,
+		"port"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.port: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	Port = TomlDatum.u.i;
+
+	TomlDatum = toml_int_in(
+		Server,
+		"poll_rate");
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.poll_rate: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	PollRate = TomlDatum.u.i;
+
+	TomlDatum = toml_string_in(
+		Server,
+		"email"
+        );
+	if ( !TomlDatum.ok )
+	{
+		LOG("Config missing server.email: %s\n", TomlErrorBuffer);
+		Error = TRUE;
+		goto Cleanup;
+	}
+	Email = TomlDatum.u.s;
+
+Cleanup:
+	if ( Config )
+	{
+		LOG("Freeing config file\n");
+		toml_free(Config);
+	}
+
+    return !Error;
+}
+
+BOOLEAN
+ParseOauth2ClientJson(
+    VOID
+    )
+/*++
+
+Routine Description:
+
+    This routine parses the Google OAuth2 client JSON.
+
+    TODO: It does not have enough error checking and
+    assumes the file has the required fields.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    TRUE - Parsing the JSON was successful.
+
+    FALSE - Parsing the JSON failed.
+
+--*/
+{
+    BOOLEAN Error;
+	FILE* ClientJsonFile = NULL;
+	PCHAR ClientJsonBuffer = NULL;
+	SIZE_T ClientJsonLength;
+	cJSON* ClientJson = NULL;
+	cJSON* ClientJsonInstalled = NULL;
+	cJSON* JsonObject = NULL;
+
+	Error = FALSE;
+
+	LOG("Parsing OAuth2 client data in %s\n", GoogleOauth2ClientJson);
+	ClientJsonFile = fopen(
+		GoogleOauth2ClientJson,
+		"rb"
+        );
+	if ( !ClientJsonFile )
+	{
+		LOG("Failed to open file \"%s\" in read mode: %s (errno %d)\n", GoogleOauth2ClientJson, ERRNO_STRING());
+        Error = TRUE;
+		goto Cleanup;
+	}
+
+	fseek(
+		ClientJsonFile,
+		0,
+		SEEK_END
+        );
+	ClientJsonLength = ftell(ClientJsonFile) + 1;
+	fseek(
+		ClientJsonFile,
+		0,
+		SEEK_SET
+        );
+
+	ClientJsonBuffer = calloc(
+		ClientJsonLength,
+		1
+        );
+	if ( !ClientJsonBuffer )
+	{
+		LOG("Failed to allocate %zu-byte buffer for client JSON: %s (errno %d)\n", ClientJsonLength, ERRNO_STRING());
+		Error = TRUE;
+		goto Cleanup;
+	}
+
+	fread(
+		ClientJsonBuffer,
+		ClientJsonLength,
+		1,
+		ClientJsonFile
+        );
+
+	ClientJson = cJSON_Parse(ClientJsonBuffer);
+	if ( !ClientJson )
+	{
+		LOG("Failed to parse client JSON: %s", cJSON_GetErrorPtr());
+		Error = TRUE;
+		goto Cleanup;
+	}
+
+	ClientJsonInstalled = cJSON_GetObjectItem(
+		ClientJson,
+		"installed"
+        );
+
+	JsonObject = cJSON_GetObjectItem(
+		ClientJsonInstalled,
+		"auth_uri"
+        );
+	GoogleOauth2AuthUri = strdup(cJSON_GetStringValue(JsonObject));
+
+	JsonObject = cJSON_GetObjectItem(
+		ClientJsonInstalled,
+		"client_id"
+        );
+	GoogleOauth2ClientId = strdup(cJSON_GetStringValue(JsonObject));
+
+	JsonObject = cJSON_GetObjectItem(
+		ClientJsonInstalled,
+		"client_secret"
+        );
+	GoogleOauth2ClientSecret = strdup(cJSON_GetStringValue(JsonObject));
+
+	JsonObject = cJSON_GetObjectItem(
+		ClientJsonInstalled,
+		"token_uri"
+        );
+	GoogleOauth2TokenUri = strdup(cJSON_GetStringValue(JsonObject));
+
+Cleanup:
+	if ( ClientJson )
+	{
+		cJSON_Delete(ClientJson);
+	}
+
+	if ( ClientJsonBuffer )
+	{
+		free(ClientJsonBuffer);
+	}
+
+	if ( ClientJsonFile )
+	{
+		fclose(ClientJsonFile);
+	}
+
+    return !Error;
 }
 
 INT
@@ -372,131 +715,35 @@ Arguments:
 
 Return Value:
 
-    INT - 0 on success, otherwise an errno code.
+    0 - Success.
+
+    errno code - An appropriate code for the error that occured (though not always).
 
 --*/
 {
     struct mg_mgr Manager;
-    FILE* ConfigFile;
-    toml_table_t* Config = NULL;
-    toml_table_t* Server;
-    char TomlErrorBuffer[128];
-    toml_datum_t TomlDatum;
-    CHAR Url[128];
+    PVOID AuthenticationThread;
 
     LOG("Initializing\n");
     mg_mgr_init(&Manager);
     psa_crypto_init();
 
+    LOG("Initializing curl\n");
+    Curl = curl_easy_init();
+    if ( !Curl )
+    {
+        LOG("Failed to initialize curl");
+        goto Cleanup;
+    }
+
     LOG("Registering signal handlers\n");
     signal(SIGINT, HandleSignal);
     signal(SIGTERM, HandleSignal);
 
-    LOG("Loading configuration " CONFIG_FILE "\n");
-    ConfigFile = fopen(
-        CONFIG_FILE,
-        "r"
-        );
-    if ( !ConfigFile )
-    {
-        LOG("Failed to open " CONFIG_FILE ": %s (errno %d)\n", ERRNO_STRING());
+    if ( !ParseConfiguration() )
+	{
         goto Cleanup;
     }
-
-    Config = toml_parse_file(
-        ConfigFile,
-        TomlErrorBuffer,
-        ARRAY_SIZE(TomlErrorBuffer)
-        );
-    fclose(ConfigFile);
-
-    LOG("Parsing config\n");
-    Server = toml_table_in(
-        Config,
-        "server"
-        );
-    if ( !Server )
-    {
-        LOG("Config missing [server]: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-
-    TomlDatum = toml_string_in(
-        Server,
-        "spreadsheet_id"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.spreadsheet_id: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    SpreadsheetId = TomlDatum.u.s;
-
-    TomlDatum = toml_string_in(
-        Server,
-        "google_oauth2_client"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.google_oauth2_client: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    GoogleOauth2Client = TomlDatum.u.s;
-
-    TomlDatum = toml_string_in(
-        Server,
-        "google_oauth2_token"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.google_oauth2_token: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    GoogleOauth2Token = TomlDatum.u.s;
-
-    TomlDatum = toml_string_in(
-        Server,
-        "tls_cert_path"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.tls_cert_path: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    TlsCertPath = TomlDatum.u.s;
-
-    TomlDatum = toml_string_in(
-        Server,
-        "tls_key_path"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.tls_key_path: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    TlsKeyPath = TomlDatum.u.s;
-
-    TomlDatum = toml_int_in(
-        Server,
-        "port"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.port: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    Port = TomlDatum.u.i;
-
-    TomlDatum = toml_int_in(
-        Server,
-        "poll_rate"
-        );
-    if ( !TomlDatum.ok )
-    {
-        LOG("Config missing server.poll_rate: %s\n", TomlErrorBuffer);
-        goto Cleanup;
-    }
-    PollRate = TomlDatum.u.i;
 
     snprintf(
         Url,
@@ -511,8 +758,11 @@ Return Value:
         LOG("Using OAuth2 token %s\n", GoogleOauth2Token);
     }
     else
-    {
-        LOG("Using OAuth2 client data in %s\n", GoogleOauth2Client);
+	{
+		if ( !ParseOauth2ClientJson() )
+		{
+			goto Cleanup;
+		}
     }
     LOG("Using TLS certificate in %s\n", TlsCertPath);
     LOG("Using TLS private key in %s\n", TlsKeyPath);
@@ -525,9 +775,32 @@ Return Value:
         &Manager
         );
 
-    if ( !strlen(GoogleOauth2Token) && !AuthenticateGoogle() )
+    if ( !strlen(GoogleOauth2Token) )
     {
-        goto Cleanup;
+        LOG("Starting OAuth thread\n");
+        AuthenticationThread = NULL;
+#ifdef _WIN32
+        AuthenticationThread = CreateThread(
+            0,
+            0,
+            (LPTHREAD_START_ROUTINE)AuthenticateGoogle,
+            NULL,
+            0,
+            NULL
+            );
+#else
+        pthread_create(
+            &AuthenticationThread,
+            NULL,
+            AuthenticateGoogle,
+            NULL
+            );
+#endif
+        if ( !AuthenticationThread )
+        {
+            LOG("Failed to create thread\n");
+            goto Cleanup;
+        }
     }
 
     LOG("Polling every %dms\n", PollRate);
@@ -543,10 +816,10 @@ Return Value:
 Cleanup:
     LOG("Shutting down\n");
 
-    if ( Config )
+    if ( Curl )
     {
-        LOG("Freeing config file\n");
-        toml_free(Config);
+        LOG("Shutting down curl");
+        curl_easy_cleanup(Curl);
     }
 
     mg_mgr_free(&Manager);
