@@ -559,10 +559,12 @@ Return Value:
         TimeOfLastRefresh = time(NULL);
 
         LOG("Set server.google_oauth2_token to \"%s\"", GoogleOauth2Token);
+        exit(0);
 	}
 	else
 	{
-        LOG("Failed to get tokens:\n%s\n", Response);
+		LOG("Failed to get tokens:\n%s\n", Response);
+		exit(1);
     }
 }
 
