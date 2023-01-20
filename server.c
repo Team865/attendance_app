@@ -10,24 +10,6 @@ Abstract:
 
     This module implements the server.
 
-Author:
-
-    MobSlicer152 19-Dec-2022
-
-Revision History:
-
-    21-Dec-2022    MobSlicer152
-
-        Add config file.
-
-    20-Dec-2022    MobSlicer152
-
-        Add API.
-
-    19-Dec-2022    MobSlicer152
-
-        Created.
-
 --*/
 
 #include "server.h"
@@ -40,6 +22,7 @@ PCHAR GoogleOauth2AuthUri;
 PCHAR GoogleOauth2TokenUri;
 PCHAR GoogleOauth2ClientId;
 PCHAR GoogleOauth2ClientSecret;
+BOOLEAN HaveGoogleOauth2Token;
 PCHAR GoogleOauth2Token;
 PCHAR TlsCertPath;
 PCHAR TlsKeyPath;
@@ -47,7 +30,12 @@ UINT16 Port;
 INT PollRate;
 PCHAR Email;
 
-CURL* Curl;
+CHAR GoogleAuthCode[256];
+CHAR GoogleAuthState[256];
+CHAR GoogleOauth2AccessToken[128];
+UINT64 TimeOfLastRefresh;
+UINT16 TimeUntilRefresh;
+BOOLEAN HaveGoogleAuthCode;
 
 VOID
 HandleEvent(
@@ -96,7 +84,7 @@ Return Value:
     {
         struct mg_http_message* HttpMessage = EventData;
         struct mg_str* Host = mg_http_get_header(HttpMessage, "Host");
-        CHAR Query[128];
+        CHAR Query[1024];
         struct mg_str QueryMgStr;
         PCHAR p;
 
@@ -156,7 +144,10 @@ Return Value:
                 ARRAY_SIZE(Name)
                 );
             if ( NameLen == -3 )
-                NameLen = strlen(Name);
+			{
+			    NameLen = strlen(Name);
+            }
+
             NumberLen = mg_http_get_var(
                 &QueryMgStr,
                 "number",
@@ -164,16 +155,23 @@ Return Value:
                 ARRAY_SIZE(Number)
                 );
             if ( NumberLen == -3 )
-                NumberLen = strlen(Number);
+			{
+			    NumberLen = strlen(Number);
+            }
+
             if ( NameLen > 0 && NumberLen > 0 )
             {
                 LOG("Received name %s and number %s\n", Name, Number);
 
                 // Warnings must start with a newline for frontend
                 if ( atoi(Number) < 100000000 )
-                    Warning = "\nNumber is invalid or less than 9 digits";
+				{
+				    Warning = "\nNumber is invalid or less than 9 digits";
+                }
                 else
+				{
                     Warning = "";
+                }
 
                 mg_http_reply(
                     Connection,
@@ -219,6 +217,34 @@ Return Value:
                     );
             }
         }
+        else if ( mg_http_match_uri(
+                    HttpMessage,
+                    MAKE_ENDPOINT(OAUTH_ENDPOINT)
+                    ) )
+        {
+            LOG("Received authentication response from Google\n");
+
+            if ( !HaveGoogleAuthCode )
+			{
+                mg_http_get_var(
+                    &QueryMgStr,
+                    "code",
+                    GoogleAuthCode,
+                    ARRAY_SIZE(GoogleAuthCode)
+                    );
+                mg_http_get_var(
+                    &QueryMgStr,
+                    "state",
+                    GoogleAuthState,
+                    ARRAY_SIZE(GoogleAuthState)
+                    );
+                HaveGoogleAuthCode = TRUE;
+            }
+			else
+			{
+
+			}
+        }
         else
         {
             LOG("Serving static content in " ROOT_DIR "/" STATIC_PAGE "\n");
@@ -254,6 +280,52 @@ Arguments:
     LOG("Received signal %d\n", LastSignal);
 }
 
+SIZE_T
+CurlWrite(
+    IN PVOID Pointer,
+    IN SIZE_T Size,
+    IN SIZE_T Count,
+    IN PVOID Buffer
+    )
+/*++
+
+Routine Description:
+
+    Writes curl'd data to a buffer (must be 1024 bytes).
+
+Arguments:
+
+    Pointer - Input data to write.
+
+    Size - Size of elements.
+
+    Count - Number of elements.
+
+    Buffer - Buffer to write to. Must be at least 1024 bytes.
+
+Return Value:
+
+    Returns the number of bytes written.
+
+--*/
+{
+    SIZE_T AmountCopied;
+
+    LOG("Writing data for cURL\n");
+    AmountCopied = MAX(Size * Count, 1024);
+    memcpy(
+        Buffer,
+        Pointer,
+        AmountCopied
+        );
+    if ( Buffer && Size == sizeof(CHAR) && strnlen(Buffer, Size * Count) > 0 )
+	{
+	    LOG("Data:\n%s\n", (PCHAR)Buffer);
+    }
+    HaveGoogleOauth2Token = TRUE;
+    return AmountCopied;
+}
+
 BOOLEAN
 AuthenticateGoogle(
     IN PVOID Parameter
@@ -278,19 +350,25 @@ Return Value:
 
 --*/
 {
+    /*
     BYTE RandomBytes[64];
-    //CHAR State[33];
+    CHAR State[33];
     CHAR CodeVerifier[129];
     CHAR CodeSha256[65];
     CHAR CodeChallenge[172];
+    */
     CHAR RequestUrl[1024];
-    CHAR IpAddress[16];
     UINT Error;
+    CURL* Curl;
+    CHAR Response[1024];
     INT i;
+    struct curl_slist* HttpHeader;
+    cJSON* JsonResponseRoot;
+    cJSON* JsonObject;
 
     (Parameter);
 
-    LOG("Creating challenge code\n");
+    /*LOG("Creating challenge code\n");
 
     CodeVerifier[0] = 0;
     Error = psa_generate_random(
@@ -310,7 +388,7 @@ Return Value:
         snprintf(
             CodeVerifier + i * 2,
             ARRAY_SIZE(CodeVerifier) - i * 2,
-            "%X",
+            "%02X",
             RandomBytes[i]
             );
         if ( !CodeVerifier[i * 2] || !CodeVerifier[i * 2 + 1] )
@@ -364,13 +442,7 @@ Return Value:
         {
             CodeChallenge[i] = '_';
         }
-    }
-
-    strncpy(
-        IpAddress,
-        "127.0.0.1",
-        15
-        );
+    }*/
 
     snprintf(
         RequestUrl,
@@ -378,23 +450,120 @@ Return Value:
         "%s?"
         "response_type=code&"
         "scope=openid%%20profile&"
-        "redirect_uri=https://%s/api/" OAUTH_ENDPOINT "&"
+        "redirect_uri=https://localhost:%d" MAKE_ENDPOINT(OAUTH_ENDPOINT) "&"
         "client_id=%s&"
-		"state=&"
-        "code_challenge=%s&"
-        "code_challenge_method=S256&"
+		"state=asdf&"
+        //"code_challenge=%s&"
+        //"code_challenge_method=S256&"
         "login_hint=%s",
         GoogleOauth2AuthUri,
-        IpAddress,
+        Port,
         GoogleOauth2ClientId,
-        //State,
-        CodeChallenge,
+        //CodeChallenge,
         Email
         );
 
     LOG("Visit this URL to authenticate: %s\n", RequestUrl);
+	HaveGoogleAuthCode = FALSE;
+    while ( !HaveGoogleAuthCode )
+	{
+        ;
+    }
 
-    return TRUE;
+    HttpHeader = NULL;
+    HttpHeader = curl_slist_append(
+        HttpHeader,
+        "Content-Type: application/x-www-form-urlencoded"
+        );
+    snprintf(
+        RequestUrl,
+        ARRAY_SIZE(RequestUrl),
+        "client_id=%s&"
+        "client_secret=%s&"
+        "code=%s&"
+        //"code_verifier=%s&"
+		"redirect_uri=https%%3A//localhost%%3A%hu" MAKE_ENDPOINT(OAUTH_ENDPOINT) "&"
+		"grant_type=authorization_code",
+        GoogleOauth2ClientId,
+		GoogleOauth2ClientSecret,
+	    GoogleAuthCode,
+        Port
+		//CodeVerifier
+        );
+    LOG("Requesting token:\n%s\n", RequestUrl);
+    HaveGoogleOauth2Token = FALSE;
+    Curl = curl_easy_init();
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_PROTOCOLS,
+        CURLPROTO_HTTPS
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_URL,
+        "https://oauth2.googleapis.com/token"
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_HTTPHEADER,
+        HttpHeader
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_POSTFIELDS,
+        RequestUrl
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_POSTFIELDSIZE,
+        strlen(RequestUrl) + 1
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_SSL_VERIFYPEER,
+        FALSE
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_WRITEDATA,
+        Response
+        );
+    curl_easy_setopt(
+        Curl,
+        CURLOPT_WRITEFUNCTION,
+        CurlWrite
+        );
+    curl_easy_perform(Curl);
+    curl_easy_cleanup(Curl);
+    
+    JsonResponseRoot = cJSON_Parse(Response);
+    JsonObject = cJSON_GetObjectItem(
+        JsonResponseRoot,
+        "access_token"
+        );
+    if ( JsonObject )
+	{
+        strncpy(
+            GoogleOauth2AccessToken,
+            cJSON_GetStringValue(JsonObject),
+            ARRAY_SIZE(GoogleOauth2AccessToken)
+            );
+		JsonObject = cJSON_GetObjectItem(
+			JsonResponseRoot,
+			"refresh_token"
+            );
+		GoogleOauth2Token = strdup(
+            cJSON_GetStringValue(JsonObject)
+            );
+        TimeUntilRefresh = cJSON_GetNumberValue(JsonObject);
+        TimeOfLastRefresh = time(NULL);
+
+        LOG("Set server.google_oauth2_token to \"%s\"", GoogleOauth2Token);
+	}
+	else
+	{
+        LOG("Failed to get tokens:\n%s\n", Response);
+    }
 }
 
 BOOLEAN
@@ -728,14 +897,6 @@ Return Value:
     mg_mgr_init(&Manager);
     psa_crypto_init();
 
-    LOG("Initializing curl\n");
-    Curl = curl_easy_init();
-    if ( !Curl )
-    {
-        LOG("Failed to initialize curl");
-        goto Cleanup;
-    }
-
     LOG("Registering signal handlers\n");
     signal(SIGINT, HandleSignal);
     signal(SIGTERM, HandleSignal);
@@ -810,17 +971,15 @@ Return Value:
             &Manager,
             PollRate
             );
+        if ( time(NULL) - TimeOfLastRefresh > TimeUntilRefresh )
+		{
+            RefreshGoogleToken();
+        }
     }
 
     errno = 0;
 Cleanup:
     LOG("Shutting down\n");
-
-    if ( Curl )
-    {
-        LOG("Shutting down curl");
-        curl_easy_cleanup(Curl);
-    }
 
     mg_mgr_free(&Manager);
     return errno;

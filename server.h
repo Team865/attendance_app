@@ -59,6 +59,8 @@ Revision History:
 #include "mongoose.h"
 #include "toml.h"
 
+#undef snprintf
+
 #include "types.h"
 
 //
