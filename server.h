@@ -10,24 +10,6 @@ Abstract:
 
     This module contains definitions for the server.
 
-Author:
-
-    MobSlicer152 19-Dec-2022
-
-Revision History:
-
-    21-Dec-2022    MobSlicer152
-
-        Switch some preprocessor macros to being in a config file.
-
-    20-Dec-2022    MobSlicer152
-
-        Add more definitions.
-
-    19-Dec-2022    MobSlicer152
-
-        Created.
-
 --*/
 
 #pragma once
@@ -98,7 +80,7 @@ Revision History:
 // Clamp to range
 //
 
-#define CLAMP(x, min, max) ((x) < (max) && (x) > (min) ? (x) : (x) > (max) ? (x) < (min) ? (min) : (x) : (max))
+#define CLAMP(Value, Min, Max) ((Value) < (Max) && (Value) > (Min) ? (Value) : (Value) > (Max) ? (Value) < (Min) ? (Min) : (Value) : (Max))
 
 //
 // Get the number of elements in an array
@@ -266,6 +248,15 @@ SendUser(
 BOOLEAN
 AuthenticateGoogle(
     IN PVOID Parameter
+    );
+
+//
+// Refresh Google token
+//
+
+BOOLEAN
+RefreshGoogleToken(
+    VOID
     );
 
 //

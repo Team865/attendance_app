@@ -15,6 +15,13 @@ Abstract:
 #include "server.h"
 #include "curl/easy.h"
 
+#define CURLWRITE_SIZE 2048
+typedef struct _CURL_BUFFER
+{
+    CHAR Data[CURLWRITE_SIZE];
+    SIZE_T Length;
+} CURL_BUFFER, *PCURL_BUFFER;
+
 CHAR Url[128];
 PCHAR SpreadsheetId;
 PCHAR GoogleOauth2ClientJson;
@@ -32,7 +39,7 @@ PCHAR Email;
 
 CHAR GoogleAuthCode[256];
 CHAR GoogleAuthState[256];
-CHAR GoogleOauth2AccessToken[128];
+CHAR GoogleOauth2AccessToken[256];
 UINT64 TimeOfLastRefresh;
 UINT16 TimeUntilRefresh;
 BOOLEAN HaveGoogleAuthCode;
@@ -309,12 +316,25 @@ Return Value:
 
 --*/
 {
+    PCURL_BUFFER RealBuffer = Buffer;
     SIZE_T AmountCopied;
 
+    if ( !Buffer )
+	{
+        return 0;
+    }
+
     LOG("Writing data for cURL\n");
-    AmountCopied = MAX(Size * Count, 1024);
+	if ( Size * Count > CURLWRITE_SIZE - RealBuffer->Length )
+	{
+        AmountCopied = CURLWRITE_SIZE - RealBuffer->Length;
+    }
+	else
+	{
+        AmountCopied = Size * Count;
+    }
     memcpy(
-        Buffer,
+        RealBuffer->Data + RealBuffer->Length,
         Pointer,
         AmountCopied
         );
@@ -323,6 +343,7 @@ Return Value:
 	    LOG("Data:\n%s\n", (PCHAR)Buffer);
     }
     HaveGoogleOauth2Token = TRUE;
+    RealBuffer->Length += AmountCopied;
     return AmountCopied;
 }
 
@@ -360,7 +381,7 @@ Return Value:
     CHAR RequestUrl[1024];
     UINT Error;
     CURL* Curl;
-    CHAR Response[1024];
+	CURL_BUFFER Response = {0};
     INT i;
     struct curl_slist* HttpHeader;
     cJSON* JsonResponseRoot;
@@ -449,7 +470,7 @@ Return Value:
         ARRAY_SIZE(RequestUrl),
         "%s?"
         "response_type=code&"
-        "scope=openid%%20profile&"
+        "scope=openid%%20profile%%20https://www.googleapis.com/auth/drive%%20https://www.googleapis.com/auth/drive.file%%20https://www.googleapis.com/auth/spreadsheets&"
         "redirect_uri=https://localhost:%d" MAKE_ENDPOINT(OAUTH_ENDPOINT) "&"
         "client_id=%s&"
 		"state=asdf&"
@@ -526,7 +547,7 @@ Return Value:
     curl_easy_setopt(
         Curl,
         CURLOPT_WRITEDATA,
-        Response
+        &Response
         );
     curl_easy_setopt(
         Curl,
@@ -536,7 +557,7 @@ Return Value:
     curl_easy_perform(Curl);
     curl_easy_cleanup(Curl);
     
-    JsonResponseRoot = cJSON_Parse(Response);
+    JsonResponseRoot = cJSON_Parse(Response.Data);
     JsonObject = cJSON_GetObjectItem(
         JsonResponseRoot,
         "access_token"
@@ -552,8 +573,10 @@ Return Value:
 			JsonResponseRoot,
 			"refresh_token"
             );
-		GoogleOauth2Token = strdup(
-            cJSON_GetStringValue(JsonObject)
+		GoogleOauth2Token = strdup(cJSON_GetStringValue(JsonObject));
+        JsonObject = cJSON_GetObjectItem(
+            JsonResponseRoot,
+            "expires_in"
             );
         TimeUntilRefresh = cJSON_GetNumberValue(JsonObject);
         TimeOfLastRefresh = time(NULL);
@@ -563,9 +586,134 @@ Return Value:
 	}
 	else
 	{
-		LOG("Failed to get tokens:\n%s\n", Response);
+		LOG("Failed to get tokens:\n%s\n", Response.Data);
 		exit(1);
     }
+}
+
+BOOLEAN
+RefreshGoogleToken(
+    VOID
+    )
+/*++
+
+Routine Description:
+
+    Refreshes the Google access token using the refresh token.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    TRUE - The refresh was successful.
+
+    FALSE - The refresh failed and the application sshould exit.
+
+--*/
+{
+    CHAR RequestBody[512];
+	struct curl_slist* HttpHeader;
+	CURL_BUFFER Response = {0};
+    CURL* Curl;
+    cJSON* JsonResponseRoot;
+    cJSON* JsonObject;
+
+    HttpHeader = NULL;
+    HttpHeader = curl_slist_append(
+        HttpHeader,
+        "Content-Type: application/x-www-form-urlencoded"
+        );
+    snprintf(
+        RequestBody,
+        ARRAY_SIZE(RequestBody),
+        "client_id=%s&"
+        "client_secret=%s&"
+        "grant_type=refresh_token&"
+		"refresh_token=%s",
+		GoogleOauth2ClientId,
+		GoogleOauth2ClientSecret,
+        GoogleOauth2Token
+        );
+
+    LOG("Attempting to refresh access token\n");
+	LOG("Requesting token:\n%s\n", RequestBody);
+	HaveGoogleOauth2Token = FALSE;
+	Curl = curl_easy_init();
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_PROTOCOLS,
+		CURLPROTO_HTTPS
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_URL,
+		"https://oauth2.googleapis.com/token"
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_HTTPHEADER,
+		HttpHeader
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_POSTFIELDS,
+		RequestBody
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_POSTFIELDSIZE,
+		strlen(RequestBody) + 1
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_SSL_VERIFYPEER,
+		FALSE
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_WRITEDATA,
+		&Response
+        );
+	curl_easy_setopt(
+		Curl,
+		CURLOPT_WRITEFUNCTION,
+		CurlWrite
+        );
+	curl_easy_perform(Curl);
+	curl_easy_cleanup(Curl);
+
+	JsonResponseRoot = cJSON_Parse(Response.Data);
+	JsonObject = cJSON_GetObjectItem(
+		JsonResponseRoot,
+		"access_token"
+        );
+	if (JsonObject)
+	{
+		strncpy(
+			GoogleOauth2AccessToken,
+			cJSON_GetStringValue(JsonObject),
+			ARRAY_SIZE(GoogleOauth2AccessToken) - 1
+            );
+		GoogleOauth2Token = strdup(cJSON_GetStringValue(JsonObject));
+		JsonObject = cJSON_GetObjectItem(
+			JsonResponseRoot,
+			"expires_in"
+            );
+		TimeUntilRefresh = cJSON_GetNumberValue(JsonObject);
+		TimeOfLastRefresh = time(NULL);
+	}
+	else
+	{
+	    goto Error;
+	}
+
+    LOG("New access token is \"%s\"\n", GoogleOauth2AccessToken);
+    return TRUE;
+Error:
+    LOG("Failed to refresh access token\n");
+    return FALSE;
 }
 
 BOOLEAN
@@ -908,6 +1056,11 @@ Return Value:
         goto Cleanup;
     }
 
+    if ( !ParseOauth2ClientJson() )
+	{
+        goto Cleanup;
+    }
+
     snprintf(
         Url,
         128,
@@ -916,17 +1069,14 @@ Return Value:
         );
 
     LOG("Using spreadsheet ID %s\n", SpreadsheetId);
-    if ( strlen(GoogleOauth2Token) )
-    {
-        LOG("Using OAuth2 token %s\n", GoogleOauth2Token);
-    }
-    else
+	if ( strlen(GoogleOauth2Token) )
 	{
-		if ( !ParseOauth2ClientJson() )
+		LOG("Using OAuth2 token %s\n", GoogleOauth2Token);
+		if (!RefreshGoogleToken())
 		{
 			goto Cleanup;
 		}
-    }
+	}
     LOG("Using TLS certificate in %s\n", TlsCertPath);
     LOG("Using TLS private key in %s\n", TlsKeyPath);
 
@@ -938,7 +1088,7 @@ Return Value:
         &Manager
         );
 
-    if ( !strlen(GoogleOauth2Token) )
+    if ( !strlen(GoogleOauth2AccessToken) )
     {
         LOG("Starting OAuth thread\n");
         AuthenticationThread = NULL;
@@ -964,7 +1114,7 @@ Return Value:
             LOG("Failed to create thread\n");
             goto Cleanup;
         }
-    }
+	}
 
     LOG("Polling every %dms\n", PollRate);
     while (LastSignal == 0)
@@ -973,9 +1123,13 @@ Return Value:
             &Manager,
             PollRate
             );
-        if ( time(NULL) - TimeOfLastRefresh > TimeUntilRefresh )
+        if ( strlen(GoogleOauth2AccessToken) &&
+             time(NULL) - TimeOfLastRefresh > TimeUntilRefresh )
 		{
-            RefreshGoogleToken();
+            if ( !RefreshGoogleToken() )
+			{
+                goto Cleanup;
+			}
         }
     }
 
